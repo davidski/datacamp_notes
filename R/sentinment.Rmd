@@ -1,0 +1,229 @@
+---
+title: "Sentiment Analysis"
+output: html_notebook
+---
+
+
+
+```{r setup}
+library(tidytext)
+library(tidyverse)
+```
+
+```{r}
+get_sentiments("bing")
+get_sentiments("nrc") %>% count(sentiment)
+```
+
+# Twitter Data
+
+```{r}
+load(here::here("data/geocoded_tweets.rda"))
+geocoded_tweets %>% #filter(state == "washington") %>% 
+  inner_join(get_sentiments("bing")) %>% 
+  count(state, sentiment, wt = freq) %>% 
+  group_by(state) %>% mutate(n = n / sum(n))
+```
+
+```{r}
+tweets_bing <- geocoded_tweets %>% inner_join(get_sentiments("bing"))
+
+tweets_bing %>% 
+  # Group by two columns: state and sentiment
+  group_by(state, sentiment) %>%
+  # Use summarize to calculate the mean frequency for these groups
+  summarize(freq = mean(freq)) %>%
+  spread(sentiment, freq) %>%
+  ungroup() %>%
+  # Calculate the ratio of positive to negative words
+  mutate(ratio = positive / negative,
+         state = reorder(state, ratio)) %>%
+  # Use aes() to put state on the x-axis and ratio on the y-axis
+  ggplot(aes(state, ratio)) +
+  # Make a plot with points using geom_point()
+  geom_point() +
+  coord_flip()
+```
+
+# Shakespeare Data
+
+```{r}
+load(here::here("data/shakespeare.rda"))
+shakespeare %>% count(type, title)
+```
+
+```{r}
+shakespeare %>% unnest_tokens(word, text)
+```
+```{r}
+shakespeare %>% unnest_tokens(word, text) %>% 
+  inner_join(get_sentiments("bing")) %>% 
+  count(title, word, sentiment, sort = TRUE)
+  
+```
+
+# TV Captions
+
+```{r}
+load(here::here("data/climate_text.rda"))
+tidy_tv <- climate_text %>% 
+  unnest_tokens(word, text)
+tidy_tv
+```
+
+
+```{r}
+tidy_tv %>% 
+    anti_join(stop_words) %>%
+    # Count by word with sort = TRUE
+    count(word, sort = TRUE)
+    
+tidy_tv %>%
+    # Count by station
+    count(station) %>%
+    # Rename the new column station_total
+    rename(station_total = n)
+```
+
+
+```{r}
+tv_sentiment <- tidy_tv %>% 
+    # Group by station
+    group_by(station) %>% 
+    # Define a new column station_total
+    mutate(station_total = n()) %>%
+    ungroup() %>%
+    # Implement sentiment analysis with the NRC lexicon
+    inner_join(get_sentiments("nrc"))
+tv_sentiment
+```
+```{r}
+tv_sentiment %>% count(station, sentiment, station_total)
+```
+
+```{r}
+# Which stations use the most negative words?
+tv_sentiment %>% 
+    count(station, sentiment, station_total) %>%
+    # Define a new column percent
+    mutate(percent = n / station_total) %>%
+    # Filter only for negative words
+    filter(sentiment == "negative") %>%
+    # Arrange by percent
+    arrange(percent)
+    
+# Now do the same but for positive words
+tv_sentiment %>% 
+    count(station, sentiment, station_total) %>%
+    mutate(percent = n / station_total) %>%
+    filter(sentiment == "positive") %>%
+    # Arrange by percent
+    arrange(percent)
+```
+
+```{r}
+tv_sentiment %>%
+    # Count by word and sentiment
+    count(word, sentiment) %>%
+    # Group by sentiment
+    group_by(sentiment) %>%
+    # Take the top 10 words for each sentiment
+    top_n(10, wt = n) %>%
+    ungroup() %>%
+    mutate(word = reorder(word, n)) %>%
+    # Set up the plot with aes()
+    ggplot(aes(word, n, fill = sentiment)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~ sentiment, scales = "free") +
+    coord_flip()
+```
+```{r}
+words_to_remove <- tibble(word = c("gore", "trump", "change"))
+tv_sentiment %>%
+  anti_join(words_to_remove) %>% 
+    # Count by word and sentiment
+    count(word, sentiment) %>%
+    # Group by sentiment
+    group_by(sentiment) %>%
+    # Take the top 10 words for each sentiment
+    top_n(10, wt = n) %>%
+    ungroup() %>%
+    mutate(word = reorder(word, n)) %>%
+    # Set up the plot with aes()
+    ggplot(aes(word, n, fill = sentiment)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~ sentiment, scales = "free") +
+    coord_flip()
+```
+
+```{r}
+tv_sentiment %>%
+  anti_join(words_to_remove) %>% 
+    # Filter for only negative words
+    filter(sentiment == "negative") %>%
+    # Count by word and station
+    count(word, station) %>%
+    # Group by station
+    group_by(station) %>%
+    # Take the top 10 words for each station
+    top_n(10, n) %>%
+    ungroup() %>%
+    mutate(word = reorder(paste(word, station, sep = "__"), n)) %>%
+    # Set up the plot with aes()
+    ggplot(aes(word, n, fill = station)) +
+    geom_col(show.legend = FALSE) +
+    scale_x_discrete(labels = function(x) gsub("__.+$", "", x)) +
+    facet_wrap(~ station, nrow = 2, scales = "free") +
+    coord_flip()
+```
+
+```{r}
+# Load the lubridate package
+library(lubridate)
+
+sentiment_by_time <- tidy_tv %>%
+    # Define a new column using floor_date()
+    mutate(date = floor_date(show_date, unit = "6 months")) %>%
+    # Group by date
+    group_by(date) %>%
+    mutate(total_words = n()) %>%
+    ungroup() %>%
+    # Implement sentiment analysis using the NRC lexicon
+    inner_join(get_sentiments("nrc"))
+
+sentiment_by_time %>%
+    # Filter for positive and negative words
+    filter(sentiment %in% c("positive", "negative")) %>%
+    # Count by date, sentiment, and total_words
+    count(date, sentiment, total_words) %>%
+    ungroup() %>%
+    mutate(percent = n / total_words) %>%
+    # Set up the plot with aes()
+    ggplot(aes(date, percent, color = sentiment)) +
+    geom_line(size = 1.5) +
+    geom_smooth(method = "lm", se = FALSE, lty = 2) +
+    expand_limits(y = 0)
+```
+
+```{r}
+tidy_tv %>%
+    # Define a new column that rounds each date to the nearest 1 month
+    mutate(date = floor_date(show_date, unit = "1 month")) %>%
+    filter(word %in% c("threat", "hoax", "denier",
+                       "real", "warming", "hurricane")) %>%
+    # Count by date and word
+    count(date, word) %>%
+    ungroup() %>%
+    # Set up your plot with aes()
+    ggplot(aes(date, n, color = word)) +
+    # Make facets by word
+    facet_wrap(~ word, scales = "free") +
+    geom_line(size = 1.5, show.legend = FALSE) +
+    expand_limits(y = 0)
+```
+
+# Pop Songs
+
+
+
+
