@@ -3,11 +3,10 @@ title: "Sentiment Analysis"
 output: html_notebook
 ---
 
-
-
 ```{r setup}
 library(tidytext)
 library(tidyverse)
+data_dir <- "data/tidy_sentiment"
 ```
 
 ```{r}
@@ -18,7 +17,7 @@ get_sentiments("nrc") %>% count(sentiment)
 # Twitter Data
 
 ```{r}
-load(here::here("data/geocoded_tweets.rda"))
+load(here::here(data_dir, "geocoded_tweets.rda"))
 geocoded_tweets %>% #filter(state == "washington") %>% 
   inner_join(get_sentiments("bing")) %>% 
   count(state, sentiment, wt = freq) %>% 
@@ -42,35 +41,36 @@ tweets_bing %>%
   ggplot(aes(state, ratio)) +
   # Make a plot with points using geom_point()
   geom_point() +
-  coord_flip()
+  labs(y = "Ratio Pos:Neg") +
+  coord_flip() +
+  hrbrthemes::theme_ipsum()
 ```
 
 # Shakespeare Data
 
 ```{r}
-load(here::here("data/shakespeare.rda"))
+load(here::here(data_dir, "shakespeare.rda"))
 shakespeare %>% count(type, title)
 ```
 
 ```{r}
 shakespeare %>% unnest_tokens(word, text)
 ```
+
 ```{r}
 shakespeare %>% unnest_tokens(word, text) %>% 
   inner_join(get_sentiments("bing")) %>% 
   count(title, word, sentiment, sort = TRUE)
-  
 ```
 
 # TV Captions
 
 ```{r}
-load(here::here("data/climate_text.rda"))
+load(here::here(data_dir, "climate_text.rda"))
 tidy_tv <- climate_text %>% 
   unnest_tokens(word, text)
 tidy_tv
 ```
-
 
 ```{r}
 tidy_tv %>% 
@@ -97,6 +97,19 @@ tv_sentiment <- tidy_tv %>%
     inner_join(get_sentiments("nrc"))
 tv_sentiment
 ```
+
+The group, count, ungroup paradigm feels awkward to me. We can just use `add_count` 
+and `rename` instead!
+
+```{r}
+tv_sentiment <- tidy_tv %>% 
+    add_count(station) %>% 
+    rename(station_total = n) %>%
+    # Implement sentiment analysis with the NRC lexicon
+    inner_join(get_sentiments("nrc"))
+tv_sentiment
+```
+
 ```{r}
 tv_sentiment %>% count(station, sentiment, station_total)
 ```
@@ -137,6 +150,9 @@ tv_sentiment %>%
     facet_wrap(~ sentiment, scales = "free") +
     coord_flip()
 ```
+
+Let's remove some words that shouldn't be used (proper names, not context-relevavnt, etc.).
+
 ```{r}
 words_to_remove <- tibble(word = c("gore", "trump", "change"))
 tv_sentiment %>%
@@ -176,6 +192,31 @@ tv_sentiment %>%
     facet_wrap(~ station, nrow = 2, scales = "free") +
     coord_flip()
 ```
+
+An alternate construction...
+
+```{r}
+tv_sentiment %>%
+  anti_join(words_to_remove) %>%
+  # Filter for only negative words
+  filter(sentiment == "negative") %>%
+  # Count by word and station
+  count(word, station) %>%
+  # Group by station
+  group_by(station) %>%
+  # Take the top 10 words for each station
+  top_n(10, n) %>%
+  ungroup() %>%
+  mutate(word = reorder(glue::glue("{word}__{station}"), n)) %>%
+  # Set up the plot with aes()
+  ggplot(aes(word, n, fill = station)) +
+  geom_col(show.legend = FALSE) +
+  scale_x_discrete(labels = function(x) gsub("__.+$", "", x)) +
+  facet_wrap( ~ station, nrow = 2, scales = "free") +
+  coord_flip() +
+  hrbrthemes::theme_ipsum()
+```
+
 
 ```{r}
 # Load the lubridate package
@@ -217,13 +258,191 @@ tidy_tv %>%
     # Set up your plot with aes()
     ggplot(aes(date, n, color = word)) +
     # Make facets by word
-    facet_wrap(~ word, scales = "free") +
+    facet_wrap(~ word, scales = "free_y") +
     geom_line(size = 1.5, show.legend = FALSE) +
     expand_limits(y = 0)
 ```
 
 # Pop Songs
 
+```{r}
+load(here::here(data_dir, "song_lyrics.Rda"))
+tidy_lyrics <- unnest_tokens(song_lyrics, word, lyrics)
+```
+
+```{r}
+totals <- tidy_lyrics %>%
+  # Count by song to find the word totals for each song
+  count(song) %>%
+  # Rename the new column
+  rename(total_words = n)
+
+# Print totals    
+totals
+
+lyric_counts <- tidy_lyrics %>%
+  # Combine totals with tidy_lyrics using the "song" column
+  left_join(totals, by = "song")
+```
+
+```{r}
+lyric_sentiment <- lyric_counts %>%
+    # Implement sentiment analysis with the "nrc" lexicon
+    inner_join(get_sentiments("nrc"))
+
+lyric_sentiment %>%
+    # Find how many sentiment words each song has
+    count(song, sentiment, sort = TRUE)
+```
+
+```{r}
+# What songs have the highest proportion of negative words?
+lyric_sentiment %>%
+    # Count using three arguments
+    count(song, word, sentiment) %>%
+    ungroup() %>%
+    # Make a new percent column with mutate 
+    mutate(percent = n / sum(n)) %>%
+    # Filter for only negative words
+    filter(sentiment == "negative") %>%
+    # Arrange by descending percent
+    arrange(desc(percent))
+
+# What songs have the highest proportion of positive words?
+lyric_sentiment %>%
+    # Count using three arguments
+    count(song, word, sentiment) %>%
+    ungroup() %>%
+    # Make a new percent column with mutate 
+    mutate(percent = n / sum(n)) %>%
+    # Filter for only positive words
+    filter(sentiment == "positive") %>%
+    # Arrange by descending percent
+    arrange(desc(percent))
+   
+```
+
+```{r}
+# What songs have the highest proportion of negative words?
+lyric_sentiment %>%
+    # Count using three arguments
+    count(song, sentiment, total_words) %>%
+    ungroup() %>%
+    # Make a new percent column with mutate 
+    mutate(percent = n / total_words) %>%
+    # Filter for only negative words
+    filter(sentiment == "negative") %>%
+    # Arrange by descending percent
+    arrange(desc(percent))
+
+# What songs have the highest proportion of positive words?
+lyric_sentiment %>%
+    # Count using three arguments
+    count(song, sentiment, total_words) %>%
+    ungroup() %>%
+    # Make a new percent column with mutate 
+    mutate(percent = n / total_words) %>%
+    # Filter for only positive words
+    filter(sentiment == "positive") %>%
+    # Arrange by descending percent
+    arrange(desc(percent))
+   
+```
 
 
+```{r}
+lyric_sentiment %>%
+    filter(sentiment == "positive") %>%
+    # Count by song, Billboard rank, and the total number of words
+    count(song, rank, total_words) %>%
+    ungroup() %>%
+    # Use the correct dplyr verb to make two new columns
+    mutate(percent = n / total_words,
+           rank = 10 * floor(rank / 10)) %>%
+    ggplot(aes(as.factor(rank), percent)) +
+    # Make a boxplot
+    geom_boxplot() + 
+  hrbrthemes::theme_ipsum()
+```
+
+```{r}
+lyric_sentiment %>%
+    # Filter for only negative words
+    filter(sentiment == "negative") %>%
+    # Count by song, Billboard rank, and the total number of words
+    count(song, rank, total_words) %>%
+    ungroup() %>%
+    # Mutate to make a percent column
+    mutate(percent = n / total_words,
+           rank = 10 * floor(rank / 10)) %>%
+    # Use ggplot to set up a plot with rank and percent
+    ggplot(aes(as.factor(rank), percent)) +
+    # Make a boxplot
+    geom_boxplot()
+```
+```{r}
+# How is negative sentiment changing over time?
+lyric_sentiment %>%
+    # Filter for only negative words
+    filter(sentiment == "negative") %>%
+    # Count by song, year, and the total number of words
+    count(song, year, total_words) %>%
+    ungroup() %>%
+    mutate(percent = n / total_words,
+           year = 10 * floor(year / 10)) %>%
+    # Use ggplot to set up a plot with year and percent
+    ggplot(aes(as.factor(year), percent)) +
+    geom_boxplot()
+    
+# How is positive sentiment changing over time?
+lyric_sentiment %>%
+    # Filter for only negative words
+    filter(sentiment == "positive") %>%
+    # Count by song, year, and the total number of words
+    count(song, year, total_words) %>%
+    ungroup() %>%
+    mutate(percent = n / total_words,
+           year = 10 * floor(year / 10)) %>%
+    # Use ggplot to set up a plot with year and percent
+    ggplot(aes(as.factor(year), percent)) +
+    geom_boxplot()
+```
+```{r}
+negative_by_year <- lyric_sentiment %>%
+    # Filter for negative words
+    filter(sentiment == "negative") %>%
+    count(song, year, total_words) %>%
+    ungroup() %>%
+    # Define a new column: percent
+    mutate(percent = n / total_words)
+
+# Specify the model with percent as the response and year as the predictor
+model_negative <- lm(percent ~ year, data = negative_by_year)
+
+# Use summary to see the results of the model fitting
+summary(model_negative)
+```
+
+```{r}
+positive_by_year <- lyric_sentiment %>%
+    # Filter for positive words
+    filter(sentiment == "positive") %>%
+    count(song, year, total_words) %>%
+    ungroup() %>%
+    # Define a new column: percent
+    mutate(percent = n / total_words)
+
+# Specify the model with percent as the response and year as the predictor
+model_positive <- lm(percent ~ year, data = positive_by_year)
+
+# Use summary to see the results of the model fitting
+summary(model_positive)
+```
+
+Or we can use `broom`
+
+```{r}
+broom::tidy(model_positive)
+broom::tidy(model_negative)
+```
 
