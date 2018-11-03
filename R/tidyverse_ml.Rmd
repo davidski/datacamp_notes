@@ -1,0 +1,24 @@
+---
+title: "Machine Learning in the Tidyverse"
+output: html_notebook
+---
+
+```{r setup}
+library(tidyverse)
+library(gapminder)
+```
+
+```{r}
+# Explore gapminder
+head(gapminder)
+
+# Prepare the nested dataframe gap_nested
+library(tidyverse)
+gap_nested <- gapminder %>% 
+  group_by(country) %>% 
+  nest()
+
+# Explore gap_nested
+head(gap_nested)
+```
+
