@@ -8,9 +8,9 @@ Focused on the census data from `tidycensus`.
 API key required via census.gov.
 
 ```{r setup}
-library(tidyverse)
-library(tidycensus)
-library(tigris)
+library(tidyverse)  # Oppan Tidy Style
+library(tidycensus) # Census.gov API
+library(tigris)     # TIGRIS shapefiles
 ```
 
 # Census data in R with tidycensus
@@ -437,8 +437,6 @@ ggplot(tx_joined, aes(fill = Party)) +
 ```
 
 ```{r}
-library(tidycensus)
-library(tidyverse)
 library(sf)
 
 # Get dataset with geometry set to TRUE
